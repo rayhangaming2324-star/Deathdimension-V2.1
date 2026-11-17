@@ -4,7 +4,8 @@ name: Build DeathDimension
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -18,18 +19,37 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
 
-      - name: Find and Build Plugin
-        id: build
+      - name: Prepare Source
+        id: source
         shell: bash
         run: |
+          set -e
+
           POM=$(find . -name pom.xml \
-            -not -path '*/.git/*' | head -n 1)
+            -not -path './.git/*' \
+            -print -quit)
+
+          if [ -z "$POM" ]; then
+            ZIP=$(find . -maxdepth 3 -type f \
+              -iname '*DeathDimension*Source*.zip' \
+              -print -quit)
+
+            if [ -z "$ZIP" ]; then
+              echo "ERROR: Source ZIP tidak ditemukan!"
+              exit 1
+            fi
+
+            mkdir -p .build-source
+            unzip -q "$ZIP" -d .build-source
+
+            POM=$(find .build-source -name pom.xml \
+              -print -quit)
+          fi
 
           if [ -z "$POM" ]; then
             echo "ERROR: pom.xml tidak ditemukan!"
@@ -37,13 +57,17 @@ jobs:
           fi
 
           DIR=$(dirname "$POM")
+
+          echo "pom=$POM" >> "$GITHUB_OUTPUT"
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
 
-          mvn -B -f "$POM" clean package
+      - name: Build Plugin
+        run: |
+          mvn -B -f "${{ steps.source.outputs.pom }}" clean package
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: DeathDimension-JAR
-          path: ${{ steps.build.outputs.dir }}/target/*.jar
+          path: ${{ steps.source.outputs.dir }}/target/*.jar
           if-no-files-found: error
